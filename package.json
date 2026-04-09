@@ -7,12 +7,13 @@
   "scripts": {
     "build": "tsc",
     "start": "node build/index.js",
-    "dev": "node --import tsx src/index.ts"
+    "dev": "node --import tsx src/index.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.1",
-    "dotenv": "^16.4.7",
     "bottleneck": "^2.19.5",
+    "dotenv": "^16.4.7",
     "jsonwebtoken": "^9.0.2",
     "pipedrive": "^22.10.1",
     "ts-node": "^10.9.2",
@@ -22,7 +23,8 @@
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.10.5",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.4"
   },
   "repository": {
     "type": "git",

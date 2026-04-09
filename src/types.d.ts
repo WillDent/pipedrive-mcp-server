@@ -46,7 +46,11 @@ declare module 'pipedrive' {
     constructor(apiClient: ApiClient);
     getPipelines(): Promise<any>;
     getPipeline(params: { id: number }): Promise<any>;
-    getPipelineStages(params: { id: number }): Promise<any>;
+  }
+
+  export class StagesApi {
+    constructor(apiClient: ApiClient);
+    getStages(opts?: { pipelineId?: number; start?: number; limit?: number }): Promise<any>;
   }
 
   export class ItemSearchApi {
