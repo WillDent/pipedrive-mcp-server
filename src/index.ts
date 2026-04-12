@@ -217,11 +217,21 @@ server.tool(
         // @ts-ignore - Bypass incorrect TypeScript definition
         const searchResponse = await dealsApi.searchDeals(searchTitle);
         filteredDeals = searchResponse.data || [];
+      } else if (pipelineId) {
+        // Use pipeline-specific endpoint when filtering by pipeline
+        const params: any = {
+          status: status,
+          limit: limit
+        };
+        if (stageId) params.stage_id = stageId;
+        if (ownerId) params.user_id = ownerId;
+        // @ts-ignore - getPipelineDeals accepts parameters but types may be incomplete
+        const response = await pipelinesApi.getPipelineDeals(pipelineId, params);
+        filteredDeals = response.data || [];
       } else {
         // Calculate the date filter (daysBack days ago)
         const filterDate = new Date();
         filterDate.setDate(filterDate.getDate() - daysBack);
-        const startDate = filterDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
 
         // Build API parameters (using actual Pipedrive API parameter names)
         const params: any = {
@@ -233,7 +243,6 @@ server.tool(
         // Add optional filters
         if (ownerId) params.user_id = ownerId;
         if (stageId) params.stage_id = stageId;
-        if (pipelineId) params.pipeline_id = pipelineId;
 
         // Fetch deals with filters
         // @ts-ignore - getDeals accepts parameters but types may be incomplete
@@ -270,8 +279,8 @@ server.tool(
         filteredDeals = filteredDeals.filter((deal: any) => deal.stage_id === stageId);
       }
 
-      // Filter by pipeline if specified and not already applied in API call
-      if (pipelineId && (searchTitle || !pipelineId)) {
+      // Filter by pipeline client-side only when searching by title (pipeline endpoint already handles it otherwise)
+      if (pipelineId && searchTitle) {
         filteredDeals = filteredDeals.filter((deal: any) => deal.pipeline_id === pipelineId);
       }
 
@@ -288,6 +297,20 @@ server.tool(
       // Apply limit
       if (filteredDeals.length > limit) {
         filteredDeals = filteredDeals.slice(0, limit);
+      }
+
+      // Build lookup maps for stage and pipeline names
+      const stageMap = new Map<number, string>();
+      const pipelineMap = new Map<number, string>();
+      try {
+        const [stagesResponse, pipelinesResponse] = await Promise.all([
+          stagesApi.getStages(),
+          pipelinesApi.getPipelines()
+        ]);
+        (stagesResponse.data || []).forEach((s: any) => stageMap.set(s.id, s.name));
+        (pipelinesResponse.data || []).forEach((p: any) => pipelineMap.set(p.id, p.name));
+      } catch (_) {
+        // Leave maps empty — names will fall back to IDs
       }
 
       // Build filter summary for response
@@ -313,11 +336,11 @@ server.tool(
         value: deal.value,
         currency: deal.currency,
         status: deal.status,
-        stage_name: deal.stage?.name || 'Unknown',
-        pipeline_name: deal.pipeline?.name || 'Unknown',
-        owner_name: deal.owner?.name || 'Unknown',
-        organization_name: deal.org?.name || null,
-        person_name: deal.person?.name || null,
+        stage_name: stageMap.get(deal.stage_id) || (deal.stage_id ? `Stage ${deal.stage_id}` : 'Unknown'),
+        pipeline_name: pipelineMap.get(deal.pipeline_id) || (deal.pipeline_id ? `Pipeline ${deal.pipeline_id}` : 'Unknown'),
+        owner_name: deal.user_id?.name || 'Unknown',
+        organization_name: deal.org_id?.name || null,
+        person_name: deal.person_id?.name || null,
         add_time: deal.add_time,
         last_activity_date: deal.last_activity_date,
         close_time: deal.close_time,
