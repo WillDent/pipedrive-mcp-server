@@ -131,6 +131,117 @@ const notesApi = withRateLimit(new pipedrive.NotesApi(apiClient));
 // @ts-ignore - UsersApi exists but may not be in type definitions
 const usersApi = withRateLimit(new pipedrive.UsersApi(apiClient));
 
+const pipedriveBaseUrl = `https://${process.env.PIPEDRIVE_DOMAIN}/api/v1`;
+
+const pipedriveFetch = async (
+  path: string,
+  params: Record<string, string | number | boolean | undefined> = {}
+) => {
+  const url = new URL(`${pipedriveBaseUrl}${path}`);
+  url.searchParams.set("api_token", process.env.PIPEDRIVE_API_TOKEN!);
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const response = await limiter.schedule(() => fetch(url.toString()));
+  const payload = await response.json();
+
+  if (!response.ok || payload?.success === false) {
+    throw new Error(payload?.error || `Pipedrive request failed for ${path}`);
+  }
+
+  return payload;
+};
+
+const pipedriveFetchAll = async (
+  path: string,
+  params: Record<string, string | number | boolean | undefined> = {},
+  pageSize = 500
+) => {
+  const allItems: any[] = [];
+  let start = 0;
+
+  while (true) {
+    const payload = await pipedriveFetch(path, {
+      ...params,
+      start,
+      limit: pageSize,
+    });
+
+    const items = Array.isArray(payload?.data) ? payload.data : [];
+    allItems.push(...items);
+
+    const pagination = payload?.additional_data?.pagination;
+    if (!pagination?.more_items_in_collection) {
+      break;
+    }
+
+    if (typeof pagination.next_start !== "number") {
+      break;
+    }
+
+    start = pagination.next_start;
+  }
+
+  return allItems;
+};
+
+const toNumberId = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const extractEntityId = (value: any): number | null => {
+  if (value && typeof value === "object") {
+    return (
+      toNumberId(value.id) ??
+      toNumberId(value.value) ??
+      toNumberId(value.item_id) ??
+      null
+    );
+  }
+
+  return toNumberId(value);
+};
+
+const extractEntityName = (value: any): string | null => {
+  if (value && typeof value === "object") {
+    if (typeof value.name === "string" && value.name.trim() !== "") {
+      return value.name;
+    }
+    if (typeof value.title === "string" && value.title.trim() !== "") {
+      return value.title;
+    }
+    if (typeof value.label === "string" && value.label.trim() !== "") {
+      return value.label;
+    }
+  }
+
+  return null;
+};
+
+const buildIdMap = (items: any[], idField = "id") => {
+  const map = new Map<number, any>();
+  for (const item of items) {
+    const id = extractEntityId(item?.[idField] ?? item?.id);
+    if (id !== null) {
+      map.set(id, item);
+    }
+  }
+  return map;
+};
+
 // Create MCP server
 const server = new McpServer({
   name: "pipedrive-mcp-server",
@@ -256,7 +367,10 @@ server.tool(
 
       // Filter by owner if specified and not already applied in API call
       if (ownerId && searchTitle) {
-        filteredDeals = filteredDeals.filter((deal: any) => deal.owner_id === ownerId);
+        filteredDeals = filteredDeals.filter((deal: any) => {
+          const dealOwnerId = extractEntityId(deal.owner ?? deal.owner_id ?? deal.user_id);
+          return dealOwnerId === ownerId;
+        });
       }
 
       // Filter by status if specified and searching by title
@@ -304,30 +418,116 @@ server.tool(
         limit_applied: limit
       };
 
+      // Resolve related entity names explicitly because the list API often only returns IDs.
+      const dealsForOutput = filteredDeals.slice(0, 30);
+
+      const [usersResponse, pipelinesResponse, stages] = await Promise.all([
+        usersApi.getUsers(),
+        pipelinesApi.getPipelines(),
+        pipedriveFetchAll("/stages"),
+      ]);
+
+      const usersById = buildIdMap(usersResponse.data || []);
+      const pipelinesById = buildIdMap(pipelinesResponse.data || []);
+      const stagesById = buildIdMap(stages);
+
+      const organizationIds = Array.from(
+        new Set(
+          dealsForOutput
+            .map((deal: any) => extractEntityId(deal.org ?? deal.org_id))
+            .filter((id): id is number => id !== null)
+        )
+      );
+
+      const personIds = Array.from(
+        new Set(
+          dealsForOutput
+            .map((deal: any) => extractEntityId(deal.person ?? deal.person_id))
+            .filter((id): id is number => id !== null)
+        )
+      );
+
+      const organizationEntries = await Promise.all(
+        organizationIds.map(async (id) => {
+          try {
+            const response = await organizationsApi.getOrganization({ id });
+            return [id, response.data] as const;
+          } catch (error) {
+            console.error(`Error resolving organization ${id}:`, error);
+            return null;
+          }
+        })
+      );
+
+      const personEntries = await Promise.all(
+        personIds.map(async (id) => {
+          try {
+            const response = await personsApi.getPerson({ id });
+            return [id, response.data] as const;
+          } catch (error) {
+            console.error(`Error resolving person ${id}:`, error);
+            return null;
+          }
+        })
+      );
+
+      const organizationsById = new Map<number, any>(
+        organizationEntries.filter((entry): entry is readonly [number, any] => entry !== null)
+      );
+      const personsById = new Map<number, any>(
+        personEntries.filter((entry): entry is readonly [number, any] => entry !== null)
+      );
+
       // Summarize deals to avoid massive responses but include notes and booking details
       const bookingFieldKey = "8f4b27fbd9dfc70d2296f23ce76987051ad7324e";
-      const summarizedDeals = filteredDeals.map((deal: any) => ({
-        id: deal.id,
-        title: deal.title,
-        value: deal.value,
-        currency: deal.currency,
-        status: deal.status,
-        stage_name: deal.stage?.name || 'Unknown',
-        pipeline_name: deal.pipeline?.name || 'Unknown',
-        owner_name: deal.owner?.name || 'Unknown',
-        organization_name: deal.org?.name || null,
-        person_name: deal.person?.name || null,
-        add_time: deal.add_time,
-        last_activity_date: deal.last_activity_date,
-        close_time: deal.close_time,
-        won_time: deal.won_time,
-        lost_time: deal.lost_time,
-        notes_count: deal.notes_count || 0,
-        // Include recent notes if available
-        notes: deal.notes || [],
-        // Include custom booking details field
-        booking_details: deal[bookingFieldKey] || null
-      }));
+      const summarizedDeals = dealsForOutput.map((deal: any) => {
+        const stageIdValue = extractEntityId(deal.stage ?? deal.stage_id);
+        const pipelineIdValue = extractEntityId(deal.pipeline ?? deal.pipeline_id);
+        const ownerIdValue = extractEntityId(deal.owner ?? deal.owner_id ?? deal.user_id);
+        const orgIdValue = extractEntityId(deal.org ?? deal.org_id);
+        const personIdValue = extractEntityId(deal.person ?? deal.person_id);
+
+        return {
+          id: deal.id,
+          title: deal.title,
+          value: deal.value,
+          currency: deal.currency,
+          status: deal.status,
+          stage_id: stageIdValue,
+          stage_name:
+            extractEntityName(deal.stage ?? deal.stage_id) ??
+            stagesById.get(stageIdValue ?? -1)?.name ??
+            "Unknown",
+          pipeline_id: pipelineIdValue,
+          pipeline_name:
+            extractEntityName(deal.pipeline ?? deal.pipeline_id) ??
+            pipelinesById.get(pipelineIdValue ?? -1)?.name ??
+            "Unknown",
+          owner_id: ownerIdValue,
+          owner_name:
+            extractEntityName(deal.owner ?? deal.owner_id ?? deal.user_id) ??
+            usersById.get(ownerIdValue ?? -1)?.name ??
+            "Unknown",
+          organization_id: orgIdValue,
+          organization_name:
+            extractEntityName(deal.org ?? deal.org_id) ??
+            organizationsById.get(orgIdValue ?? -1)?.name ??
+            null,
+          person_id: personIdValue,
+          person_name:
+            extractEntityName(deal.person ?? deal.person_id) ??
+            personsById.get(personIdValue ?? -1)?.name ??
+            null,
+          add_time: deal.add_time,
+          last_activity_date: deal.last_activity_date,
+          close_time: deal.close_time,
+          won_time: deal.won_time,
+          lost_time: deal.lost_time,
+          notes_count: deal.notes_count || 0,
+          notes: deal.notes || [],
+          booking_details: deal[bookingFieldKey] || null,
+        };
+      });
 
       return {
         content: [{
@@ -338,7 +538,7 @@ server.tool(
               : `Found ${filteredDeals.length} deals matching the specified filters`,
             filters_applied: filterSummary,
             total_found: filteredDeals.length,
-            deals: summarizedDeals.slice(0, 30) // Limit to 30 deals max to prevent huge responses
+            deals: summarizedDeals
           }, null, 2)
         }]
       };
@@ -721,32 +921,24 @@ server.tool(
   {},
   async () => {
     try {
-      // Since the stages are related to pipelines, we'll get all pipelines first
-      const pipelinesResponse = await pipelinesApi.getPipelines();
-      const pipelines = pipelinesResponse.data || [];
-      
-      // For each pipeline, fetch its stages
-      const allStages = [];
-      for (const pipeline of pipelines) {
-        try {
-          // @ts-ignore - Type definitions for getPipelineStages are incomplete
-          const stagesResponse = await pipelinesApi.getPipelineStages(pipeline.id);
-          const stagesData = Array.isArray(stagesResponse?.data)
-            ? stagesResponse.data
-            : [];
+      const [pipelinesResponse, stages] = await Promise.all([
+        pipelinesApi.getPipelines(),
+        pipedriveFetchAll("/stages"),
+      ]);
 
-          if (stagesData.length > 0) {
-            const pipelineStages = stagesData.map((stage: any) => ({
-              ...stage,
-              pipeline_name: pipeline.name
-            }));
-            allStages.push(...pipelineStages);
-          }
-        } catch (e) {
-          console.error(`Error fetching stages for pipeline ${pipeline.id}:`, e);
-        }
-      }
-      
+      const pipelinesById = buildIdMap(pipelinesResponse.data || []);
+      const allStages = stages.map((stage: any) => {
+        const pipelineIdValue = extractEntityId(stage.pipeline_id);
+        return {
+          ...stage,
+          pipeline_id: pipelineIdValue,
+          pipeline_name:
+            pipelinesById.get(pipelineIdValue ?? -1)?.name ??
+            extractEntityName(stage.pipeline_id) ??
+            "Unknown",
+        };
+      });
+
       return {
         content: [{
           type: "text",
