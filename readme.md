@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/willdent-pipedrive-mcp-server-badge.png)](https://mseep.ai/app/willdent-pipedrive-mcp-server)
+
 # Pipedrive MCP Server
 
 This is a Model Context Protocol (MCP) server that connects to the Pipedrive API v2. It allows you to expose Pipedrive data and functionality to LLM applications like Claude.
