@@ -13,6 +13,8 @@ export class FakeGateway implements PipedriveGateway {
   deal: Entity = { id: 1, stage_id: 10, title: "Test deal" };
   dealsPage: Page = { items: [this.deal], truncated: false };
   lastDealFilters?: DealFilters;
+  moveCalls: Array<{ dealId: number; targetStageId: number }> = [];
+  noteCalls: Array<{ dealId: number; content: string }> = [];
 
   async getUsers(): Promise<Page> { return emptyPage(); }
   async getDeals(filters: DealFilters): Promise<Page> { this.lastDealFilters = filters; return this.dealsPage; }
@@ -30,6 +32,15 @@ export class FakeGateway implements PipedriveGateway {
   async getStages(): Promise<Page> { return emptyPage(); }
   async searchLeads(_options: SearchOptions): Promise<Page> { return emptyPage(); }
   async searchAll(_options: SearchOptions & { itemTypes?: string }): Promise<Page> { return emptyPage(); }
+  async moveDeal(dealId: number, targetStageId: number): Promise<Entity> {
+    this.moveCalls.push({ dealId, targetStageId });
+    this.deal = { ...this.deal, stage_id: targetStageId };
+    return this.deal;
+  }
+  async addDealNote(dealId: number, content: string): Promise<Entity> {
+    this.noteCalls.push({ dealId, content });
+    return { id: 99, deal_id: dealId };
+  }
 }
 
 export function httpConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -45,6 +56,7 @@ export function httpConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     allowedOrigins: [],
     rateLimit: { minTimeMs: 1, maxConcurrent: 1 },
     httpSessions: { maximum: 100, idleTimeoutMs: 1_800_000 },
+    writeTools: new Set(),
     ...overrides
   };
 }

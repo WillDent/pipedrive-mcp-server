@@ -14,7 +14,11 @@ async function main(): Promise<void> {
   }
 
   const gateway = new SdkPipedriveGateway(config.pipedriveApiToken, config.rateLimit);
-  const createServer = () => createMcpServer({ gateway });
+  const createServer = () => createMcpServer({
+    gateway,
+    writeTools: config.writeTools,
+    audit: event => console.error(JSON.stringify({ type: "pipedrive_write_audit", ...event }))
+  });
 
   let running: RunningServer;
   if (config.transport === "stdio") {

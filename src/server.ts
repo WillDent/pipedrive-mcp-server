@@ -1,10 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PipedriveGateway } from "./pipedrive-gateway.js";
+import type { WriteToolName } from "./config.js";
 import { getPackageVersion } from "./version.js";
-import { registerTools } from "./tools.js";
+import { registerTools, type AuditLogger } from "./tools.js";
 
 export interface ServerDependencies {
   gateway: PipedriveGateway;
+  writeTools?: ReadonlySet<WriteToolName>;
+  audit?: AuditLogger;
   version?: string;
 }
 
@@ -14,7 +17,11 @@ export function createMcpServer(dependencies: ServerDependencies): McpServer {
     version: dependencies.version ?? getPackageVersion()
   });
 
-  registerTools(server, { gateway: dependencies.gateway });
+  registerTools(server, {
+    gateway: dependencies.gateway,
+    writeTools: dependencies.writeTools ?? new Set(),
+    audit: dependencies.audit
+  });
 
   const prompts = [
     ["list-all-deals", "List Pipedrive deals", "List the deals in Pipedrive, following nextCursor until the requested scope is complete."],

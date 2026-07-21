@@ -10,6 +10,7 @@ test("loadConfig defaults to secure local stdio", () => {
   const config = loadConfig({ PIPEDRIVE_API_TOKEN: "token" });
   assert.equal(config.transport, "stdio");
   assert.equal(config.host, "127.0.0.1");
+  assert.deepEqual([...config.writeTools], []);
   assert.equal(config.jwt, undefined);
 });
 
@@ -46,6 +47,13 @@ test("remote HTTP requires JWT and allowed hosts", () => {
   );
 });
 
+test("write tool allowlist rejects unknown tools", () => {
+  assert.throws(
+    () => loadConfig({ PIPEDRIVE_API_TOKEN: "token", PIPEDRIVE_WRITE_TOOLS: "delete-everything" }),
+    /Unsupported PIPEDRIVE_WRITE_TOOLS/
+  );
+});
+
 test("HTTP paths, hosts, origins, and booleans are validated", () => {
   assert.throws(
     () => loadConfig({ PIPEDRIVE_API_TOKEN: "token", MCP_HTTP_PATH: "/health" }),
@@ -68,7 +76,7 @@ test("HTTP paths, hosts, origins, and booleans are validated", () => {
 test("package version loads from metadata and falls back safely", () => {
   const directory = mkdtempSync(join(tmpdir(), "pipedrive-version-"));
   const valid = join(directory, "package.json");
-  writeFileSync(valid, JSON.stringify({ version: "2.0.0-test" }));
-  assert.equal(getPackageVersion(valid), "2.0.0-test");
+  writeFileSync(valid, JSON.stringify({ version: "2.1.0-test" }));
+  assert.equal(getPackageVersion(valid), "2.1.0-test");
   assert.equal(getPackageVersion(join(directory, "missing.json")), "unknown");
 });

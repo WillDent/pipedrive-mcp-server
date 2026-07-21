@@ -2,7 +2,7 @@
 
 A single-tenant, self-hosted Model Context Protocol server for Pipedrive. Version 2.x uses Pipedrive API v2 for deals, persons, organizations, pipelines, stages, leads, and item search. Notes and users remain isolated behind clearly scoped v1 adapters because Pipedrive has not moved those APIs to v2.
 
-Version 2.0 is strictly read-only.
+The server is read-only by default. Two narrowly scoped write tools can be enabled explicitly and remain preview-first.
 
 ## Requirements
 
@@ -124,6 +124,19 @@ Single-record tools return `{ "item": {} }`. Stable failures return `{ "code", "
 
 `get-deals` has no hidden status or activity-date defaults. It supports owner, stage, pipeline, status, updated-time, value, cursor, limit, and generic custom-field selection. Page size defaults to 100 and is capped at 500. Value filtering scans at most 2,000 deals and reports `truncated` and `nextCursor` when more records remain. Use `search-deals` for title searches.
 
+## Gated writes
+
+No write tools are registered unless named in `PIPEDRIVE_WRITE_TOOLS`:
+
+```bash
+PIPEDRIVE_WRITE_TOOLS=move-deal,add-deal-note
+```
+
+- `move-deal` requires `dealId`, `targetStageId`, and `expectedCurrentStageId`. It performs a best-effort optimistic stale-state check immediately before the update. Pipedrive does not expose an atomic conditional stage update, so concurrent changes by another client can still race this check.
+- `add-deal-note` accepts at most 10,000 characters of plain text and HTML-escapes it before sending.
+- Both tools preview by default. A mutation happens only with `execute: true`.
+- Audit output contains only operation, entity ID, outcome, and timestamp—never note contents or credentials.
+
 ## Configuration
 
 | Variable | Default | Purpose |
@@ -141,6 +154,7 @@ Single-record tools return `{ "item": {} }`. Stable failures return `{ "code", "
 | `MCP_JWT_SECRET` | empty | HS256 secret; required off loopback |
 | `MCP_JWT_ISSUER` | empty | Optional JWT issuer |
 | `MCP_JWT_AUDIENCE` | empty | Optional JWT audience |
+| `PIPEDRIVE_WRITE_TOOLS` | empty | Explicit write-tool allowlist |
 | `PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS` | `250` | Minimum delay between queued calls |
 | `PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT` | `2` | Maximum concurrent calls |
 
@@ -154,6 +168,7 @@ All ports, paths, numeric limits, origins, hosts, boolean values, and tool names
 4. Point modern clients at `/mcp`; legacy clients may use `/sse` through 2.x.
 5. Update callers for cursor pagination and the structured response contract.
 6. Review deal queries: `get-deals` no longer silently forces open status or a 365-day activity window.
+7. Leave `PIPEDRIVE_WRITE_TOOLS` empty until each write has been reviewed and sandbox-tested.
 
 ## Development and release
 
