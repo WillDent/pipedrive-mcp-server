@@ -118,3 +118,23 @@ test("deal filters normalize timestamps to Pipedrive's supported second precisio
   assert.equal(request?.updated_since, "2026-07-20T12:34:56Z");
   assert.equal(request?.updated_until, "2026-07-21T01:02:03Z");
 });
+
+test("non-idempotent note creation is never automatically retried", async () => {
+  const delays: number[] = [];
+  const gateway = new SdkPipedriveGateway(
+    "token",
+    { minTimeMs: 1, maxConcurrent: 1 },
+    async delay => { delays.push(delay); }
+  );
+  let attempts = 0;
+  Object.defineProperty(gateway, "notes", { value: {
+    addNote: async () => {
+      attempts += 1;
+      throw { response: { status: 503 } };
+    }
+  } });
+
+  await assert.rejects(gateway.addDealNote(1, "note"));
+  assert.equal(attempts, 1);
+  assert.deepEqual(delays, []);
+});

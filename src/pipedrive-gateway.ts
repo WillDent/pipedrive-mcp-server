@@ -62,6 +62,8 @@ export interface PipedriveGateway {
   getStages(limit: number, cursor?: string, pipelineId?: number): Promise<Page>;
   searchLeads(options: SearchOptions): Promise<Page>;
   searchAll(options: SearchOptions & { itemTypes?: string }): Promise<Page>;
+  moveDeal(dealId: number, targetStageId: number): Promise<Entity>;
+  addDealNote(dealId: number, escapedHtml: string): Promise<Entity>;
 }
 
 type Sleep = (milliseconds: number) => Promise<void>;
@@ -197,8 +199,9 @@ export class SdkPipedriveGateway implements PipedriveGateway {
     this.limiter = new Bottleneck({ minTime: rateLimit.minTimeMs, maxConcurrent: rateLimit.maxConcurrent });
   }
 
-  private async request<T>(operation: () => Promise<T>): Promise<T> {
-    return requestWithRetry(() => this.limiter.schedule(operation), this.sleep);
+  private async request<T>(operation: () => Promise<T>, retry = true): Promise<T> {
+    const scheduled = () => this.limiter.schedule(operation);
+    return retry ? requestWithRetry(scheduled, this.sleep) : scheduled();
   }
 
   async getUsers(): Promise<Page> {
@@ -314,4 +317,16 @@ export class SdkPipedriveGateway implements PipedriveGateway {
     return { items: nestedItems(response), nextCursor: cursor, truncated: Boolean(cursor) };
   }
 
+  async moveDeal(dealId: number, targetStageId: number): Promise<Entity> {
+    return responseData(await this.request(() => this.deals.updateDeal({
+      id: dealId,
+      UpdateDealRequest: { stage_id: targetStageId }
+    })));
+  }
+
+  async addDealNote(dealId: number, escapedHtml: string): Promise<Entity> {
+    return responseData(await this.request(() => this.notes.addNote({
+      AddNoteRequest: { deal_id: dealId, content: escapedHtml }
+    }), false));
+  }
 }

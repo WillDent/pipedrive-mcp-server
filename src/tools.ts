@@ -2,9 +2,21 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { PipedriveGateway, Page } from "./pipedrive-gateway.js";
+import type { WriteToolName } from "./config.js";
+
+export interface AuditEvent {
+  timestamp: string;
+  operation: WriteToolName;
+  entityId: number;
+  outcome: "preview" | "success" | "rejected" | "error";
+}
+
+export type AuditLogger = (event: AuditEvent) => void;
 
 export interface ToolDependencies {
   gateway: PipedriveGateway;
+  writeTools: ReadonlySet<WriteToolName>;
+  audit?: AuditLogger;
 }
 
 const paginationShape = {
@@ -48,13 +60,18 @@ function statusFromError(error: unknown): number | undefined {
   return typeof status === "number" ? status : undefined;
 }
 
-function sanitizedError(error: unknown): CallToolResult {
+function sanitizedError(error: unknown, allowRetry = true): CallToolResult {
   const status = statusFromError(error);
   const code = status ? `PIPEDRIVE_HTTP_${status}` : "PIPEDRIVE_REQUEST_FAILED";
-  const retryable = status !== undefined && [429, 502, 503, 504].includes(status);
+  const transient = status !== undefined && [429, 502, 503, 504].includes(status);
+  const retryable = allowRetry && transient;
   const payload = {
     code,
-    message: retryable ? "Pipedrive is temporarily unavailable; retry the request." : "The Pipedrive request failed.",
+    message: transient && !allowRetry
+      ? "The note request outcome may be ambiguous; verify the deal before trying again."
+      : retryable
+        ? "Pipedrive is temporarily unavailable; retry the request."
+        : "The Pipedrive request failed.",
     retryable
   };
   return {
@@ -64,11 +81,41 @@ function sanitizedError(error: unknown): CallToolResult {
   };
 }
 
-async function safeCall(operation: () => Promise<CallToolResult>): Promise<CallToolResult> {
+async function safeCall(
+  operation: () => Promise<CallToolResult>,
+  onError?: () => void,
+  allowRetry = true
+): Promise<CallToolResult> {
   try {
     return await operation();
   } catch (error) {
-    return sanitizedError(error);
+    onError?.();
+    return sanitizedError(error, allowRetry);
+  }
+}
+
+function readNumber(entity: Record<string, unknown>, key: string): number | undefined {
+  const value = entity[key];
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return undefined;
+}
+
+export function escapeNoteText(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
+    .replaceAll("\n", "<br>");
+}
+
+function audit(dependencies: ToolDependencies, event: Omit<AuditEvent, "timestamp">): void {
+  try {
+    dependencies.audit?.({ timestamp: new Date().toISOString(), ...event });
+  } catch {
+    // Audit sinks must never change a completed mutation into a reported failure.
   }
 }
 
@@ -175,4 +222,61 @@ export function registerTools(server: McpServer, dependencies: ToolDependencies)
     term: args.term, ...(args.itemTypes ? { itemTypes: args.itemTypes } : {})
   })));
 
+  if (dependencies.writeTools.has("move-deal")) {
+    server.registerTool("move-deal", {
+      description: "Preview or execute a guarded deal stage move.",
+      inputSchema: {
+        dealId: z.number().int().positive(),
+        targetStageId: z.number().int().positive(),
+        expectedCurrentStageId: z.number().int().positive(),
+        execute: z.boolean().default(false)
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+    }, args => safeCall(async () => {
+      const deal = await dependencies.gateway.getDeal(args.dealId);
+      const currentStageId = readNumber(deal, "stage_id") ?? readNumber(asNestedEntity(deal.stage), "id");
+      if (currentStageId !== args.expectedCurrentStageId) {
+        audit(dependencies, { operation: "move-deal", entityId: args.dealId, outcome: "rejected" });
+        const payload = {
+          code: "STALE_DEAL_STAGE",
+          message: "The deal stage changed after the request was prepared.",
+          retryable: false,
+          expectedCurrentStageId: args.expectedCurrentStageId,
+          actualCurrentStageId: currentStageId
+        };
+        return { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload, isError: true };
+      }
+      if (!args.execute) {
+        audit(dependencies, { operation: "move-deal", entityId: args.dealId, outcome: "preview" });
+        return itemResult({ operation: "move-deal", execute: false, dealId: args.dealId, currentStageId, targetStageId: args.targetStageId });
+      }
+      const updated = await dependencies.gateway.moveDeal(args.dealId, args.targetStageId);
+      audit(dependencies, { operation: "move-deal", entityId: args.dealId, outcome: "success" });
+      return itemResult(updated);
+    }, () => audit(dependencies, { operation: "move-deal", entityId: args.dealId, outcome: "error" })));
+  }
+
+  if (dependencies.writeTools.has("add-deal-note")) {
+    server.registerTool("add-deal-note", {
+      description: "Preview or execute adding a plain-text note to a deal.",
+      inputSchema: {
+        dealId: z.number().int().positive(),
+        content: z.string().min(1).max(10_000),
+        execute: z.boolean().default(false)
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
+    }, args => safeCall(async () => {
+      if (!args.execute) {
+        audit(dependencies, { operation: "add-deal-note", entityId: args.dealId, outcome: "preview" });
+        return itemResult({ operation: "add-deal-note", execute: false, dealId: args.dealId, contentLength: args.content.length });
+      }
+      const note = await dependencies.gateway.addDealNote(args.dealId, escapeNoteText(args.content));
+      audit(dependencies, { operation: "add-deal-note", entityId: args.dealId, outcome: "success" });
+      return itemResult(note);
+    }, () => audit(dependencies, { operation: "add-deal-note", entityId: args.dealId, outcome: "error" }), false));
+  }
+}
+
+function asNestedEntity(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
 }

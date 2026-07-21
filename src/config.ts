@@ -1,6 +1,9 @@
 import { isIP } from "node:net";
 import { z } from "zod";
 
+export const WRITE_TOOL_NAMES = ["move-deal", "add-deal-note"] as const;
+export type WriteToolName = (typeof WRITE_TOOL_NAMES)[number];
+
 export interface AppConfig {
   pipedriveApiToken: string;
   transport: "stdio" | "http";
@@ -24,6 +27,7 @@ export interface AppConfig {
     maximum: number;
     idleTimeoutMs: number;
   };
+  writeTools: Set<WriteToolName>;
 }
 
 const positiveInteger = (name: string, fallback: number) =>
@@ -67,7 +71,8 @@ const envSchema = z.object({
   PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS: positiveInteger("PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS", 250),
   PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT: positiveInteger("PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT", 2),
   MCP_MAX_SESSIONS: positiveInteger("MCP_MAX_SESSIONS", 100).refine(value => value <= 10_000, "MCP_MAX_SESSIONS must be at most 10000"),
-  MCP_SESSION_IDLE_TIMEOUT_MS: positiveInteger("MCP_SESSION_IDLE_TIMEOUT_MS", 1_800_000)
+  MCP_SESSION_IDLE_TIMEOUT_MS: positiveInteger("MCP_SESSION_IDLE_TIMEOUT_MS", 1_800_000),
+  PIPEDRIVE_WRITE_TOOLS: z.string().optional()
 });
 
 const splitList = (value?: string): string[] =>
@@ -130,6 +135,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
+  const requestedWriteTools = splitList(parsed.PIPEDRIVE_WRITE_TOOLS);
+  const invalidWriteTools = requestedWriteTools.filter(
+    tool => !WRITE_TOOL_NAMES.includes(tool as WriteToolName)
+  );
+  if (invalidWriteTools.length > 0) {
+    throw new Error(`Unsupported PIPEDRIVE_WRITE_TOOLS value(s): ${invalidWriteTools.join(", ")}`);
+  }
+
   return {
     pipedriveApiToken: parsed.PIPEDRIVE_API_TOKEN,
     transport,
@@ -152,6 +165,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     httpSessions: {
       maximum: parsed.MCP_MAX_SESSIONS,
       idleTimeoutMs: parsed.MCP_SESSION_IDLE_TIMEOUT_MS
-    }
+    },
+    writeTools: new Set(requestedWriteTools as WriteToolName[])
   };
 }
