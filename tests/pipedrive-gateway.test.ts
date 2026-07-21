@@ -95,3 +95,26 @@ test("SDK list and search adapters normalize cursors consistently", async () => 
     assert.equal(page.truncated, true);
   }
 });
+
+test("deal filters normalize timestamps to Pipedrive's supported second precision", async () => {
+  const gateway = new SdkPipedriveGateway("token", { minTimeMs: 1, maxConcurrent: 10 });
+  let request: { updated_since?: string; updated_until?: string } | undefined;
+  Object.defineProperty(gateway, "deals", {
+    value: {
+      getDeals: async (options: { updated_since?: string; updated_until?: string }) => {
+        request = options;
+        return { data: [] };
+      }
+    }
+  });
+
+  await gateway.getDeals({
+    updatedSince: "2026-07-20T12:34:56.123Z",
+    updatedUntil: "2026-07-21T01:02:03.999Z",
+    limit: 100,
+    scanLimit: 2_000
+  });
+
+  assert.equal(request?.updated_since, "2026-07-20T12:34:56Z");
+  assert.equal(request?.updated_until, "2026-07-21T01:02:03Z");
+});
