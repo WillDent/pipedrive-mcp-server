@@ -7,11 +7,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: pipedrive-release
+  cancel-in-progress: false
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -21,6 +27,10 @@ jobs:
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: node -e "const p=require('./package.json');if(!/^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$/.test(process.env.TAG_NAME)||'v'+p.version!==process.env.TAG_NAME)throw new Error('stable tag and package version must match')"
+      - name: Verify tag targets main
+        run: |
+          git fetch --no-tags origin main
+          test "$(git rev-parse "$GITHUB_SHA^{commit}")" = "$(git rev-parse "origin/main^{commit}")"
       - run: npm run check
       - run: npm pack --dry-run
 
