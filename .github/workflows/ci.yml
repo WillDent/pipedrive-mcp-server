@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm pack --dry-run
+
+  docker:
+    name: Docker smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - run: docker build --tag pipedrive-mcp-server:test .
+      - name: Verify non-root healthy container
+        run: |
+          docker run --detach --name pipedrive-mcp-test \
+            --publish 127.0.0.1:3000:3000 \
+            --env PIPEDRIVE_API_TOKEN=test-token \
+            --env MCP_TRANSPORT=http \
+            --env MCP_HOST=0.0.0.0 \
+            --env MCP_ALLOWED_HOSTS=127.0.0.1,localhost \
+            --env MCP_JWT_SECRET=ci-only-secret-with-at-least-32-characters \
+            pipedrive-mcp-server:test
+          test "$(docker inspect --format '{{.Config.User}}' pipedrive-mcp-test)" = node
+          for attempt in $(seq 1 30); do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' pipedrive-mcp-test)" = healthy ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs pipedrive-mcp-test
+          exit 1
+      - if: always()
+        run: docker rm --force pipedrive-mcp-test

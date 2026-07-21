@@ -6,40 +6,28 @@ services:
     container_name: pipedrive-mcp-server
     restart: unless-stopped
     environment:
-      # Required: Pipedrive API credentials
       - PIPEDRIVE_API_TOKEN=${PIPEDRIVE_API_TOKEN}
-      - PIPEDRIVE_DOMAIN=${PIPEDRIVE_DOMAIN}
-
-      # Optional: JWT authentication
-      - MCP_JWT_SECRET=${MCP_JWT_SECRET:-}
-      - MCP_JWT_TOKEN=${MCP_JWT_TOKEN:-}
-      - MCP_JWT_ALGORITHM=${MCP_JWT_ALGORITHM:-HS256}
+      - MCP_TRANSPORT=http
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=${MCP_PORT:-3000}
+      - MCP_HTTP_PATH=${MCP_HTTP_PATH:-/mcp}
+      - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - MCP_ALLOWED_ORIGINS=${MCP_ALLOWED_ORIGINS:-}
+      - MCP_ENABLE_LEGACY_SSE=${MCP_ENABLE_LEGACY_SSE:-true}
+      - MCP_MAX_SESSIONS=${MCP_MAX_SESSIONS:-100}
+      - MCP_SESSION_IDLE_TIMEOUT_MS=${MCP_SESSION_IDLE_TIMEOUT_MS:-1800000}
+      - MCP_JWT_SECRET=${MCP_JWT_SECRET:?MCP_JWT_SECRET must be at least 32 characters}
       - MCP_JWT_AUDIENCE=${MCP_JWT_AUDIENCE:-}
       - MCP_JWT_ISSUER=${MCP_JWT_ISSUER:-}
-
-      # Optional: Rate limiting configuration
+      - PIPEDRIVE_WRITE_TOOLS=${PIPEDRIVE_WRITE_TOOLS:-}
       - PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS=${PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS:-250}
       - PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT=${PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT:-2}
-
-      # Transport configuration (use 'sse' for Docker deployments)
-      - MCP_TRANSPORT=${MCP_TRANSPORT:-sse}
-      - MCP_PORT=${MCP_PORT:-3000}
-      - MCP_ENDPOINT=${MCP_ENDPOINT:-/message}
-
-      # Node environment
       - NODE_ENV=production
 
-    # Expose the SSE port
     ports:
-      - "${MCP_PORT:-3000}:${MCP_PORT:-3000}"
-
-    # Use stdin/stdout for MCP communication (only needed for stdio transport)
-    stdin_open: true
-    tty: true
-
-    # Health check
+      - "127.0.0.1:${MCP_PORT:-3000}:${MCP_PORT:-3000}"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${MCP_PORT:-3000}/health", "||", "exit", "1"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + process.env.MCP_PORT + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3

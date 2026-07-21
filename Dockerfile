@@ -1,15 +1,14 @@
-# Multi-stage build for optimized image size
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Set working directory
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY tsconfig.json ./
+COPY tsconfig*.json ./
 
 # Install dependencies
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 # Copy source code
 COPY src ./src
@@ -18,10 +17,7 @@ COPY src ./src
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine
-
-# Install wget for healthcheck
-RUN apk add --no-cache wget
+FROM node:24-alpine
 
 # Set working directory
 WORKDIR /app
@@ -30,7 +26,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --only=production
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy built application from builder stage
 COPY --from=builder /app/build ./build
@@ -43,6 +39,8 @@ EXPOSE 3000
 
 # Run as non-root user for security
 USER node
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["node", "-e", "if(!['http','sse'].includes(process.env.MCP_TRANSPORT||'stdio'))process.exit(0);fetch('http://127.0.0.1:'+(process.env.MCP_PORT||'3000')+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
 # Start the application
 CMD ["node", "build/index.js"]
