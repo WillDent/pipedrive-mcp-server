@@ -99,6 +99,11 @@ function responseData(response: unknown): Entity {
   return asEntity((response as { data?: unknown }).data);
 }
 
+function pipedriveTimestamp(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return new Date(value).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 function errorStatus(error: unknown): number | undefined {
   if (typeof error !== "object" || error === null || !("response" in error)) return undefined;
   const response = (error as { response?: unknown }).response;
@@ -208,8 +213,8 @@ export class SdkPipedriveGateway implements PipedriveGateway {
         stage_id: filters.stageId,
         pipeline_id: filters.pipelineId,
         status: filters.status,
-        updated_since: filters.updatedSince,
-        updated_until: filters.updatedUntil,
+        updated_since: pipedriveTimestamp(filters.updatedSince),
+        updated_until: pipedriveTimestamp(filters.updatedUntil),
         custom_fields: filters.customFieldKeys?.join(","),
         limit,
         cursor
