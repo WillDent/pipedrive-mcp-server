@@ -170,7 +170,7 @@ test("failed HTTP initialization is cleaned up without consuming capacity", asyn
 
 test("HTTP session capacity is enforced and idle sessions expire", { timeout: 5_000 }, async () => {
   const running = await startHttpServer(httpConfig({
-    httpSessions: { maximum: 1, idleTimeoutMs: 10 }
+    httpSessions: { maximum: 1, idleTimeoutMs: 1_000 }
   }), () => createMcpServer({ gateway: new FakeGateway(), version: "test" }));
   const first = new Client({ name: "capacity-first", version: "test" });
   const blocked = new Client({ name: "capacity-blocked", version: "test" });
@@ -181,7 +181,7 @@ test("HTTP session capacity is enforced and idle sessions expire", { timeout: 5_
       blocked.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${running.port}/mcp`))),
       /Session capacity reached/
     );
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await new Promise(resolve => setTimeout(resolve, 1_100));
     await replacement.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${running.port}/mcp`)));
     assert.equal(running.activeSessionCount(), 1);
   } finally {
