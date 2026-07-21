@@ -1,32 +1,48 @@
 {
   "name": "pipedrive-mcp-server",
-  "version": "1.0.4",
+  "version": "2.0.0",
   "description": "Model Context Protocol server for Pipedrive API integration",
   "main": "build/index.js",
+  "bin": {
+    "pipedrive-mcp-server": "build/index.js"
+  },
   "type": "module",
+  "files": [
+    "build",
+    "LICENSE",
+    "readme.md",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "validate:package": "node scripts/validate-package.mjs",
+    "prepack": "npm run check && npm run validate:package",
     "start": "node build/index.js",
     "dev": "node --import tsx src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.7.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^16.4.7",
     "bottleneck": "^2.19.5",
     "jsonwebtoken": "^9.0.2",
-    "pipedrive": "^22.10.1",
-    "ts-node": "^10.9.2",
-    "zod": "^3.22.4"
+    "pipedrive": "^33.4.3",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.6",
-    "@types/node": "^20.10.5",
+    "@types/node": "^24.0.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/juhokoskela/pipedrive-mcp-server.git"
+    "url": "git+https://github.com/WillDent/pipedrive-mcp-server.git"
   },
   "keywords": [
     "pipedrive",
@@ -38,7 +54,7 @@
   "author": "Will Dent",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/juhokoskela/pipedrive-mcp-server/issues"
+    "url": "https://github.com/WillDent/pipedrive-mcp-server/issues"
   },
-  "homepage": "https://github.com/juhokoskela/pipedrive-mcp-server#readme"
+  "homepage": "https://github.com/WillDent/pipedrive-mcp-server#readme"
 }

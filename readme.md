@@ -1,196 +1,174 @@
 # Pipedrive MCP Server
 
-This is a Model Context Protocol (MCP) server that connects to the Pipedrive API v2. It allows you to expose Pipedrive data and functionality to LLM applications like Claude.
+A single-tenant, self-hosted Model Context Protocol server for Pipedrive. Version 2.x uses Pipedrive API v2 for deals, persons, organizations, pipelines, stages, leads, and item search. Notes and users remain isolated behind clearly scoped v1 adapters because Pipedrive has not moved those APIs to v2.
 
-## Features
+Version 2.0 is strictly read-only.
 
-- Read-only access to Pipedrive data
-- Exposes deals, persons, organizations, and pipelines
-- Includes all fields including custom fields
-- Predefined prompts for common operations
-- Docker support with multi-stage builds
-- JWT authentication support
-- Built-in rate limiting for API requests
-- Advanced deal filtering (by owner, status, date range, value, etc.)
+## Requirements
 
-## Setup
+- Node.js 22 or 24 (Node 24 recommended)
+- A Pipedrive API token
 
-### Standard Setup
+`PIPEDRIVE_DOMAIN` is not used. The official Pipedrive client supplies the API base URL.
 
-1. Clone this repository
-2. Install dependencies:
-   ```
-   npm install
-   ```
-3. Create a `.env` file in the root directory with your configuration:
-   ```
-   PIPEDRIVE_API_TOKEN=your_api_token_here
-   PIPEDRIVE_DOMAIN=your-company.pipedrive.com
-   ```
-4. Build the project:
-   ```
-   npm run build
-   ```
-5. Start the server:
-   ```
-   npm start
-   ```
+## Install and run with stdio
 
-### Docker Setup
+Install globally:
 
-#### Option 1: Using Docker Compose (standalone)
-
-1. Copy `.env.example` to `.env` and configure your settings:
-   ```bash
-   PIPEDRIVE_API_TOKEN=your_api_token_here
-   PIPEDRIVE_DOMAIN=your-company.pipedrive.com
-   MCP_TRANSPORT=sse  # Use SSE transport for Docker
-   MCP_PORT=3000
-   ```
-2. Build and run with Docker Compose:
-   ```bash
-   docker-compose up -d
-   ```
-3. The server will be available at `http://localhost:3000`
-   - SSE endpoint: `http://localhost:3000/sse`
-   - Health check: `http://localhost:3000/health`
-
-#### Option 2: Using Pre-built Docker Image
-
-Pull and run the pre-built image from GitHub Container Registry:
-
-**For SSE transport (HTTP access):**
 ```bash
-docker run -d \
-  -p 3000:3000 \
-  -e PIPEDRIVE_API_TOKEN=your_api_token_here \
-  -e PIPEDRIVE_DOMAIN=your-company.pipedrive.com \
-  -e MCP_TRANSPORT=sse \
-  -e MCP_PORT=3000 \
-  ghcr.io/juhokoskela/pipedrive-mcp-server:main
+npm install --global pipedrive-mcp-server
+PIPEDRIVE_API_TOKEN=your-token pipedrive-mcp-server
 ```
 
-**For stdio transport (local use):**
+Or build this repository:
+
 ```bash
-docker run -i \
-  -e PIPEDRIVE_API_TOKEN=your_api_token_here \
-  -e PIPEDRIVE_DOMAIN=your-company.pipedrive.com \
-  ghcr.io/juhokoskela/pipedrive-mcp-server:main
+npm ci
+npm run check
+PIPEDRIVE_API_TOKEN=your-token npm start
 ```
 
-#### Option 3: Integrating into Existing Project
-
-Add the MCP server to your existing application's `docker-compose.yml`:
-
-```yaml
-services:
-  # Your existing services...
-
-  pipedrive-mcp-server:
-    image: ghcr.io/juhokoskela/pipedrive-mcp-server:main
-    container_name: pipedrive-mcp-server
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - PIPEDRIVE_API_TOKEN=${PIPEDRIVE_API_TOKEN}
-      - PIPEDRIVE_DOMAIN=${PIPEDRIVE_DOMAIN}
-      - MCP_TRANSPORT=sse
-      - MCP_PORT=3000
-      - PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS=${PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS:-250}
-      - PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT=${PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT:-2}
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health", "||", "exit", "1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-```
-
-Then add the required environment variables to your `.env` file.
-
-### Environment Variables
-
-Required:
-- `PIPEDRIVE_API_TOKEN` - Your Pipedrive API token
-- `PIPEDRIVE_DOMAIN` - Your Pipedrive domain (e.g., `your-company.pipedrive.com`)
-
-Optional (JWT Authentication):
-- `MCP_JWT_SECRET` - JWT secret for authentication
-- `MCP_JWT_TOKEN` - JWT token for authentication
-- `MCP_JWT_ALGORITHM` - JWT algorithm (default: HS256)
-- `MCP_JWT_AUDIENCE` - JWT audience
-- `MCP_JWT_ISSUER` - JWT issuer
-
-When JWT authentication is enabled, all SSE requests (`/sse` and the message endpoint) must include an `Authorization: Bearer <token>` header signed with the configured secret.
-
-Optional (Rate Limiting):
-- `PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS` - Minimum time between requests in milliseconds (default: 250)
-- `PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT` - Maximum concurrent requests (default: 2)
-
-Optional (Transport Configuration):
-- `MCP_TRANSPORT` - Transport type: `stdio` (default, for local use) or `sse` (for Docker/HTTP access)
-- `MCP_PORT` - Port for SSE transport (default: 3000, only used when `MCP_TRANSPORT=sse`)
-- `MCP_ENDPOINT` - Message endpoint path for SSE (default: /message, only used when `MCP_TRANSPORT=sse`)
-
-## Using with Claude
-
-To use this server with Claude for Desktop:
-
-1. Configure Claude for Desktop by editing your `claude_desktop_config.json`:
+Example desktop MCP configuration:
 
 ```json
 {
   "mcpServers": {
     "pipedrive": {
-      "command": "node",
-      "args": ["/path/to/pipedrive-mcp-server/build/index.js"],
+      "command": "pipedrive-mcp-server",
       "env": {
-        "PIPEDRIVE_API_TOKEN": "your_api_token_here",
-        "PIPEDRIVE_DOMAIN": "your-company.pipedrive.com"
+        "PIPEDRIVE_API_TOKEN": "your-token"
       }
     }
   }
 }
 ```
 
-2. Restart Claude for Desktop
-3. In the Claude application, you should now see the Pipedrive tools available
+## Streamable HTTP
 
-## Available Tools
+The modern HTTP endpoint defaults to `http://127.0.0.1:3000/mcp`:
 
-- `get-users`: Get all users/owners from Pipedrive to identify owner IDs for filtering
-- `get-deals`: Get deals with flexible filtering options (search by title, date range, owner, stage, status, value range, etc.)
-- `get-deal`: Get a specific deal by ID (including custom fields)
-- `get-deal-notes`: Get detailed notes and custom booking details for a specific deal
-- `search-deals`: Search deals by term
-- `get-persons`: Get all persons from Pipedrive (including custom fields)
-- `get-person`: Get a specific person by ID (including custom fields)
-- `search-persons`: Search persons by term
-- `get-organizations`: Get all organizations from Pipedrive (including custom fields)
-- `get-organization`: Get a specific organization by ID (including custom fields)
-- `search-organizations`: Search organizations by term
-- `get-pipelines`: Get all pipelines from Pipedrive
-- `get-pipeline`: Get a specific pipeline by ID
-- `get-stages`: Get all stages from all pipelines
-- `search-leads`: Search leads by term
-- `search-all`: Search across all item types (deals, persons, organizations, etc.)
+```bash
+PIPEDRIVE_API_TOKEN=your-token \
+MCP_TRANSPORT=http \
+pipedrive-mcp-server
+```
 
-## Available Prompts
+`GET /health` is unauthenticated, host-validated, and returns only service status. The server creates an independent MCP server and transport for every session and closes active sessions during shutdown.
 
-- `list-all-deals`: List all deals in Pipedrive
-- `list-all-persons`: List all persons in Pipedrive
-- `list-all-pipelines`: List all pipelines in Pipedrive
-- `analyze-deals`: Analyze deals by stage
-- `analyze-contacts`: Analyze contacts by organization
-- `analyze-leads`: Analyze leads by status
-- `compare-pipelines`: Compare different pipelines and their stages
-- `find-high-value-deals`: Find high-value deals
+Binding to a non-loopback address requires both an HS256 JWT secret of at least 32 characters and an explicit hostname allowlist:
+
+```bash
+PIPEDRIVE_API_TOKEN=your-token \
+MCP_TRANSPORT=http \
+MCP_HOST=0.0.0.0 \
+MCP_ALLOWED_HOSTS=mcp.example.com \
+MCP_ALLOWED_ORIGINS=https://app.example.com \
+MCP_JWT_SECRET='replace-with-at-least-32-random-characters' \
+pipedrive-mcp-server
+```
+
+The built-in HTTP server does not terminate TLS. Never expose it directly on an untrusted network: place it behind a trusted HTTPS reverse proxy, keep the application port private, and configure the proxy to replace (not append to) forwarding headers. JWT bearer tokens are replayable if captured. Docker Compose therefore publishes the service only on host loopback by default; remote operators must add a TLS terminator before changing that binding.
+
+Clients send `Authorization: Bearer <token>`. Tokens must use HS256. `MCP_JWT_ISSUER` and `MCP_JWT_AUDIENCE` add optional claim validation. There is no boot-token setting.
+
+`MCP_ALLOWED_ORIGINS` is an exact, comma-separated allowlist. When it is empty the server emits no CORS headers; wildcard CORS is not supported. `MCP_ALLOWED_HOSTS` contains hostnames only, without schemes, paths, or ports.
+
+## Legacy SSE
+
+The deprecated compatibility routes are `GET /sse` and `POST /messages`. They are enabled by default in 2.x and can be disabled with `MCP_ENABLE_LEGACY_SSE=false`. `MCP_TRANSPORT=sse` remains an alias for HTTP mode and emits a warning. These routes are planned for removal in 3.0.
+
+## Docker
+
+Copy `.env.example` to `.env`, set `PIPEDRIVE_API_TOKEN`, and set a random `MCP_JWT_SECRET` of at least 32 characters. Then run:
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Compose serves `/mcp` on port 3000, requires JWT for MCP routes, runs as the unprivileged `node` user, and checks `/health` with Node’s built-in `fetch`. Published images use `ghcr.io/willdent/pipedrive-mcp-server`.
+
+For stdio in Docker, override the transport and disable the HTTP health check:
+
+```bash
+docker run --rm -i --no-healthcheck \
+  -e PIPEDRIVE_API_TOKEN=your-token \
+  -e MCP_TRANSPORT=stdio \
+  ghcr.io/willdent/pipedrive-mcp-server:latest
+```
+
+## Tools and response contract
+
+Read tools:
+
+- `get-users`
+- `get-deals`, `get-deal`, `get-deal-notes`, `search-deals`
+- `get-persons`, `get-person`, `search-persons`
+- `get-organizations`, `get-organization`, `search-organizations`
+- `get-pipelines`, `get-pipeline`, `get-stages`
+- `search-leads`, `search-all`
+
+List/search tools return JSON text and structured content shaped as:
+
+```json
+{
+  "items": [],
+  "count": 0,
+  "nextCursor": "optional-cursor",
+  "truncated": false,
+  "filters": {}
+}
+```
+
+Single-record tools return `{ "item": {} }`. Stable failures return `{ "code", "message", "retryable" }` with MCP `isError: true`; raw API errors, credentials, and token-bearing URLs are not exposed.
+
+`get-deals` has no hidden status or activity-date defaults. It supports owner, stage, pipeline, status, updated-time, value, cursor, limit, and generic custom-field selection. Page size defaults to 100 and is capped at 500. Value filtering scans at most 2,000 deals and reports `truncated` and `nextCursor` when more records remain. Use `search-deals` for title searches.
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PIPEDRIVE_API_TOKEN` | required | Pipedrive API token |
+| `MCP_TRANSPORT` | `stdio` | `stdio`, `http`, or deprecated `sse` alias |
+| `MCP_HOST` | `127.0.0.1` | HTTP bind address |
+| `MCP_PORT` | `3000` | HTTP port |
+| `MCP_HTTP_PATH` | `/mcp` | Streamable HTTP path |
+| `MCP_ALLOWED_HOSTS` | local hosts | Exact hostname allowlist |
+| `MCP_ALLOWED_ORIGINS` | empty | Exact CORS origin allowlist |
+| `MCP_ENABLE_LEGACY_SSE` | `true` | Keep `/sse` and `/messages` |
+| `MCP_MAX_SESSIONS` | `100` | Maximum combined HTTP/SSE sessions |
+| `MCP_SESSION_IDLE_TIMEOUT_MS` | `1800000` | Close sessions idle longer than this duration |
+| `MCP_JWT_SECRET` | empty | HS256 secret; required off loopback |
+| `MCP_JWT_ISSUER` | empty | Optional JWT issuer |
+| `MCP_JWT_AUDIENCE` | empty | Optional JWT audience |
+| `PIPEDRIVE_RATE_LIMIT_MIN_TIME_MS` | `250` | Minimum delay between queued calls |
+| `PIPEDRIVE_RATE_LIMIT_MAX_CONCURRENT` | `2` | Maximum concurrent calls |
+
+All ports, paths, numeric limits, origins, hosts, boolean values, and tool names are validated at startup.
+
+## Migrating from 1.x
+
+1. Upgrade Node to 22 or 24.
+2. Remove `PIPEDRIVE_DOMAIN`, `MCP_JWT_TOKEN`, `MCP_JWT_ALGORITHM`, and `MCP_ENDPOINT`.
+3. Replace HTTP `MCP_TRANSPORT=sse` with `MCP_TRANSPORT=http`; keep the alias temporarily if a client still uses legacy SSE.
+4. Point modern clients at `/mcp`; legacy clients may use `/sse` through 2.x.
+5. Update callers for cursor pagination and the structured response contract.
+6. Review deal queries: `get-deals` no longer silently forces open status or a 365-day activity window.
+
+## Development and release
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run validate:package
+```
+
+See [docs/release-checklist.md](docs/release-checklist.md) for automated, Docker, and manual Pipedrive sandbox gates. Releases are tag-driven and use npm trusted publishing plus GHCR semantic tags.
+
+## Scope
+
+Version 2.x remains single-tenant and self-hosted. Pipedrive OAuth, MCP OAuth, persistent sessions, broad CRUD, and destructive delete tools are intentionally out of scope.
 
 ## License
 
